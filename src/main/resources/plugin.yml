@@ -1,0 +1,37 @@
+name: TPI_VS
+version: '${project.version}'
+main: me.calladius.tpi_vs.TpiVsPlugin
+api-version: '1.21.11'
+folia-supported: true
+author: Calladius
+commands:
+  afk:
+    description: переключить AFK статус
+    usage: /afk
+  invsee:
+    description: просмотр инвентаря игрока
+    usage: /invsee <игрок>
+    permission: tpi_vs.admin
+    aliases: [inventory, inv]
+  endersee:
+    description: просмотр эндер честа игрока
+    usage: /endersee <игрок>
+    permission: tpi_vs.admin
+    aliases: [ecsee, enderchest, ec]
+  prefix:
+    description: настройка префикса
+    usage: /prefix
+  tpi_vs:
+    description: управление плагином
+    usage: /tpi_vs reload
+    permission: tpi_vs.admin
+permissions:
+  tpi_vs.admin:
+    description: доступ к админским командам
+    default: op
+  tpi_vs.prefix:
+    description: доступ к команде /prefix
+    default: true
+  tpi_vs.afk:
+    description: доступ к команде /afk
+    default: true

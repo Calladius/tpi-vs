@@ -1,0 +1,18 @@
+# конфиг tpi_vs
+# тик = 50мс, 60 тиков = 3 секунды
+
+tab:
+  update-interval-ticks: 60    # как часто обновлять таб
+  server-name: "VNLLA.RU"     # название в шапке
+  server-sub-name: "survival"  # подзаголовок
+
+afk:
+  timeout-seconds: 300          # через сколько сек автоматический афк
+  hostile-mob-radius: 10        # радиус проверки мобов
+  mob-protection: true          # мобы не трогают афкшников
+
+prefix:
+  max-length: 5                 # макс символов в префиксе
+
+admin:
+  permission: "tpi_vs.admin"    # право для админских команд
