@@ -711,7 +711,7 @@ public class PrefixGui implements Listener, CommandExecutor, TabCompleter {
         player.getScheduler().execute(plugin, () -> openMainGui(player), () -> {}, 1L);
     }
 
-    // не чистим данные при закрытии — переключение гуи вызывает close event
+    // не чистим при закрытии — переключение гуи вызывает close event
     // чистим в savePrefix(), onCommand(), onPlayerQuit()
     @EventHandler
     public void onInventoryClose(InventoryCloseEvent event) {
@@ -868,7 +868,7 @@ public class PrefixGui implements Listener, CommandExecutor, TabCompleter {
         return sb.toString();
     }
 
-    // упрощённый парсер — покрывает основные случаи
+    // упрощёный парсер, основные случаи покрывает
     private List<PrefixSegment> parseMiniMessageToSegments(String miniMsg) {
         List<PrefixSegment> segments = new ArrayList<>();
         if (miniMsg == null || miniMsg.isEmpty()) return segments;

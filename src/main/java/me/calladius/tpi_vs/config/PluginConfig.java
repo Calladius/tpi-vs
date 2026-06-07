@@ -15,6 +15,7 @@ public class PluginConfig {
     private boolean afkMobProtection;
 
     private int maxPrefixLength;
+    private String defaultPrefix;
 
     private String adminPermission;
 
@@ -34,6 +35,7 @@ public class PluginConfig {
         afkMobProtection = config.getBoolean("afk.mob-protection", true);
 
         maxPrefixLength = config.getInt("prefix.max-length", 5);
+        defaultPrefix = config.getString("prefix.default-prefix", "<bold><aqua>VNLLA</aqua></bold>");
 
         adminPermission = config.getString("admin.permission", "tpi_vs.admin");
     }
@@ -49,6 +51,7 @@ public class PluginConfig {
         config.set("afk.mob-protection", afkMobProtection);
 
         config.set("prefix.max-length", maxPrefixLength);
+        config.set("prefix.default-prefix", defaultPrefix);
 
         config.set("admin.permission", adminPermission);
 
@@ -62,6 +65,7 @@ public class PluginConfig {
     public int getHostileMobRadius() { return hostileMobRadius; }
     public boolean isAfkMobProtection() { return afkMobProtection; }
     public int getMaxPrefixLength() { return maxPrefixLength; }
+    public String getDefaultPrefix() { return defaultPrefix; }
     public String getAdminPermission() { return adminPermission; }
 
     public void setMaxPrefixLength(int length) { this.maxPrefixLength = length; }

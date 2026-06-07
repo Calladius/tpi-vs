@@ -13,6 +13,7 @@ afk:
 
 prefix:
   max-length: 5                 # макс символов в префиксе
+  default-prefix: "<bold><aqua>VNLLA</aqua></bold>"  # если игрок не задал свой
 
 admin:
   permission: "tpi_vs.admin"    # право для админских команд

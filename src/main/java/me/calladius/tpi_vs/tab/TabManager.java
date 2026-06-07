@@ -18,35 +18,88 @@ public class TabManager {
     private ScheduledTask updateTask;
     private final MiniMessage miniMessage;
 
-    // невидимые символы для выравнивания из ресурспака
-    private static final String PAD_CHAR = "\uE010";
-    private static final String SPACE_CHAR = "\uE011";
-    private static final String PAD2_CHAR = "\uE012";
+    // невидимык символы из ресурспака для паддинга, 1-6px
+    private static final char[] PAD_CHARS = {
+        '\0',       // 0 не юзается
+        '\uE015',   // 1px
+        '\uE014',   // 2px
+        '\uE013',   // 3px
+        '\uE012',   // 4px
+        '\uE011',   // 5px
+        '\uE010',   // 6px
+    };
     private static final String FONT_OPEN = "<font:vnlla:width>";
     private static final String FONT_CLOSE = "</font>";
 
-    // таблица ширин символов в пикселях, для пропорционального шрифта майна
+    // ширины символов в пикселях, вытащил из текстуры майна
     private static final int[] CHAR_WIDTHS = new int[65536];
     static {
+        // по дефолту 6
         for (int i = 0; i < CHAR_WIDTHS.length; i++) CHAR_WIDTHS[i] = 6;
+
+        // пробел
         CHAR_WIDTHS[' '] = 4;
-        for (char c : "!.:,;|'`lIi1".toCharArray()) CHAR_WIDTHS[c] = 2;
-        for (char c : "[](){}t\"".toCharArray()) CHAR_WIDTHS[c] = 4;
-        for (char c : "fk*".toCharArray()) CHAR_WIDTHS[c] = 5;
-        for (char c : "~@MW".toCharArray()) CHAR_WIDTHS[c] = 7;
-        // кирилица в основном по 6px
-        for (char c = 'а'; c <= 'я'; c++) CHAR_WIDTHS[c] = 6;
-        for (char c = 'А'; c <= 'Я'; c++) CHAR_WIDTHS[c] = 6;
-        CHAR_WIDTHS['ё'] = 6; CHAR_WIDTHS['Ё'] = 6;
-        CHAR_WIDTHS['л'] = 6; CHAR_WIDTHS['Л'] = 6;
-        CHAR_WIDTHS['д'] = 6; CHAR_WIDTHS['Д'] = 6;
-        for (char c = '0'; c <= '9'; c++) CHAR_WIDTHS[c] = 6;
-        CHAR_WIDTHS['⏳'] = 6;
+
+        // узкие 2px
+        CHAR_WIDTHS['!'] = 2;
+        CHAR_WIDTHS['.'] = 2;
+        CHAR_WIDTHS[':'] = 2;
+        CHAR_WIDTHS[','] = 2;
+        CHAR_WIDTHS[';'] = 2;
+        CHAR_WIDTHS['|'] = 2;
+        CHAR_WIDTHS['\''] = 2;
+        CHAR_WIDTHS['i'] = 2;
+
+        // 3px
+        CHAR_WIDTHS['l'] = 3;
+        CHAR_WIDTHS['`'] = 3;
+
+        // 4px
+        CHAR_WIDTHS['['] = 4;
+        CHAR_WIDTHS[']'] = 4;
+        CHAR_WIDTHS['('] = 4;
+        CHAR_WIDTHS[')'] = 4;
+        CHAR_WIDTHS['{'] = 4;
+        CHAR_WIDTHS['}'] = 4;
+        CHAR_WIDTHS['t'] = 4;
+        CHAR_WIDTHS['I'] = 4;
+        CHAR_WIDTHS['"'] = 4;
+        CHAR_WIDTHS['*'] = 4;
+
+        // 5px
+        CHAR_WIDTHS['f'] = 5;
+        CHAR_WIDTHS['k'] = 5;
+        CHAR_WIDTHS['<'] = 5;
+        CHAR_WIDTHS['>'] = 5;
+
+        // 7px
+        CHAR_WIDTHS['@'] = 7;
+        CHAR_WIDTHS['~'] = 7;
+
+        // кирилица, мерил по текстуре nonlatin_european.png
+        CHAR_WIDTHS['Б'] = 4;
+        CHAR_WIDTHS['Г'] = 8;
+        CHAR_WIDTHS['Д'] = 7;
+        CHAR_WIDTHS['Е'] = 7;
+        CHAR_WIDTHS['Л'] = 7;
+        CHAR_WIDTHS['Н'] = 8;
+        CHAR_WIDTHS['Ъ'] = 8;
+        CHAR_WIDTHS['Ь'] = 7;
+        CHAR_WIDTHS['Ю'] = 8;
+        CHAR_WIDTHS['Я'] = 9;
+        CHAR_WIDTHS['а'] = 7;
+        CHAR_WIDTHS['б'] = 8;
+        CHAR_WIDTHS['д'] = 8;
+        CHAR_WIDTHS['к'] = 5;
+        CHAR_WIDTHS['л'] = 7;
+        CHAR_WIDTHS['р'] = 5;
+        CHAR_WIDTHS['я'] = 7;
     }
 
-    // макс ширина префикса в пикселях
+    // ширина дефолтного префикса — по нему выравниваем все ники
     private int getMaxPixelWidth() {
-        return plugin.getPluginConfig().getMaxPrefixLength() * 6;
+        String def = plugin.getPluginConfig().getDefaultPrefix();
+        return getPixelWidth(def);
     }
 
     public TabManager(TpiVsPlugin plugin) {
@@ -132,59 +185,29 @@ public class TabManager {
         } catch (Exception ignored) {}
     }
 
-    // выравнивание — паддинг перед префиксом чтоб ники были ровно
+    // выравнивание таба — паддинг чтоб ники были ровно
     public void updatePlayerListName(Player player) {
         String prefix = plugin.getPrefixManager().getPrefix(player.getUniqueId());
         boolean isAfk = plugin.getAfkManager().isAfk(player.getUniqueId());
-        boolean hasPrefix = prefix != null && !prefix.isEmpty();
+        // если нет своего префикса — юзаем дефолтный
+        if (prefix == null || prefix.isEmpty()) {
+            prefix = plugin.getPluginConfig().getDefaultPrefix();
+        }
         int maxPx = getMaxPixelWidth();
+        int prefixPx = getPixelWidth(prefix);
+        int padPx = Math.max(0, maxPx - prefixPx);
 
         StringBuilder sb = new StringBuilder();
 
-        if (hasPrefix) {
-            // пиксельная ширина видимого текста
-            String visibleText = prefix.replaceAll("<[^>]+>", "");
-            int prefixPx = getPixelWidth(visibleText);
-            int padPx = Math.max(0, maxPx - prefixPx);
+        // невидимый паддинг перед префиксом
+        sb.append(FONT_OPEN);
+        sb.append(buildPadding(padPx));
+        sb.append(FONT_CLOSE);
+        // сам префикс
+        sb.append(prefix);
 
-            // 6+4+2 = можно набрать любую чётную ширину
-            int pad6 = padPx / 6;
-            int remainder = padPx % 6;
-
-            sb.append(FONT_OPEN);
-            for (int i = 0; i < pad6; i++) {
-                sb.append(PAD_CHAR);
-            }
-            // добиваем остаток
-            if (remainder >= 4) {
-                sb.append(SPACE_CHAR);
-                remainder -= 4;
-            }
-            if (remainder >= 2) {
-                sb.append(PAD2_CHAR);
-            }
-            sb.append(FONT_CLOSE);
-            sb.append(prefix);
-            sb.append(FONT_OPEN).append(SPACE_CHAR).append(FONT_CLOSE);
-        } else {
-            // без префикса — просто паддинг
-            int pad6 = maxPx / 6;
-            int remainder = maxPx % 6;
-            sb.append(FONT_OPEN);
-            for (int i = 0; i < pad6; i++) {
-                sb.append(PAD_CHAR);
-            }
-            if (remainder >= 4) {
-                sb.append(SPACE_CHAR);
-                remainder -= 4;
-            }
-            if (remainder >= 2) {
-                sb.append(PAD2_CHAR);
-            }
-            sb.append(SPACE_CHAR);
-            sb.append(FONT_CLOSE);
-        }
-
+        // пробел перед ником
+        sb.append(' ');
         sb.append("<white>").append(player.getName()).append("</white>");
 
         if (isAfk) {
@@ -198,15 +221,53 @@ public class TabManager {
         }
     }
 
-    // подсчёт ширины текста в пикселях
+    // собрать строку невидимых символов на заданную ширину
+    private String buildPadding(int px) {
+        if (px <= 0) return "";
+        StringBuilder sb = new StringBuilder();
+        // сколько 6px
+        int count6 = px / 6;
+        for (int i = 0; i < count6; i++) {
+            sb.append(PAD_CHARS[6]);
+        }
+        // остаток одним символом
+        int rem = px % 6;
+        if (rem > 0) {
+            sb.append(PAD_CHARS[rem]);
+        }
+        return sb.toString();
+    }
+
+    // посчитать ширину текста в пикселях, парсит минимесседж теги
+    // bold даёт +1px на символ, остальное не влияет на ширину
     private int getPixelWidth(String text) {
         int width = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c < CHAR_WIDTHS.length) {
-                width += CHAR_WIDTHS[c];
+        boolean bold = false;
+        int i = 0;
+        while (i < text.length()) {
+            if (text.charAt(i) == '<') {
+                int end = text.indexOf('>', i);
+                if (end == -1) { i++; continue; }
+                String tag = text.substring(i + 1, end).toLowerCase().trim();
+                // bold вкл
+                if (tag.equals("bold") || tag.equals("b")) {
+                    bold = true;
+                }
+                // bold выкл
+                else if (tag.equals("/bold") || tag.equals("/b")) {
+                    bold = false;
+                }
+                // reset скидывает всё
+                else if (tag.equals("reset")) {
+                    bold = false;
+                }
+                i = end + 1;
             } else {
-                width += 6; // по умолчанию
+                char c = text.charAt(i);
+                int cw = (c < CHAR_WIDTHS.length) ? CHAR_WIDTHS[c] : 6;
+                if (bold) cw += 1; // жирный на 1px шире
+                width += cw;
+                i++;
             }
         }
         return width;

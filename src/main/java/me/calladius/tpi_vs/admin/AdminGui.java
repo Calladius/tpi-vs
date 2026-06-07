@@ -15,6 +15,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -158,6 +159,26 @@ public class AdminGui implements Listener {
         UUID adminUuid = admin.getUniqueId();
         viewingInventory.remove(adminUuid);
         viewingEnder.remove(adminUuid);
+    }
+
+    // драг ивент — перетаскивание с зажатой кнопкой, просто отменяем чтоб не было десинка
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (!(event.getWhoClicked() instanceof Player admin)) return;
+
+        String title = event.getView().getTitle();
+        boolean isInventory = title.startsWith(INV_PREFIX);
+        boolean isEnder = title.startsWith(ENDER_PREFIX);
+        if (!isInventory && !isEnder) return;
+
+        // если хоть один слот из верхнего инвентаря — отменяем
+        int topSize = event.getView().getTopInventory().getSize();
+        for (int slot : event.getRawSlots()) {
+            if (slot >= 0 && slot < topSize) {
+                event.setCancelled(true);
+                return;
+            }
+        }
     }
 
     private void handleInventoryClick(Player admin, Player target, InventoryClickEvent event, int guiSlot) {

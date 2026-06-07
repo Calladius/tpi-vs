@@ -61,7 +61,7 @@ public class AfkManager implements Listener {
         }
     }
 
-    // двухфазная проверка: асинк по таймеру + синк в регионе игрока для проверки мобов
+    // двухфазная проверка — асинк по таймеру, потом синк в регионе игрока для мобов
     private void checkAfkStatus() {
         PluginConfig config = plugin.getPluginConfig();
         long timeoutMs = config.getAfkTimeoutSeconds() * 1000L;
@@ -100,7 +100,7 @@ public class AfkManager implements Listener {
         }
     }
 
-    // вызывать только в контексте региона игрока
+    // тока в контексте региона игрока
     private boolean hasHostileMobsNearby(Player player) {
         PluginConfig config = plugin.getPluginConfig();
         int radius = config.getHostileMobRadius();
@@ -117,7 +117,7 @@ public class AfkManager implements Listener {
         return false;
     }
 
-    // ставим afk напрямую — мы уже в контексте региона игрока
+    // ставим afk напрямую, мы уже в регионе игрока
     private void setAfkDirect(UUID uuid, boolean afk) {
         boolean wasAfk = afkStatus.getOrDefault(uuid, false);
         afkStatus.put(uuid, afk);
@@ -143,7 +143,7 @@ public class AfkManager implements Listener {
         plugin.getTabManager().updatePlayerListName(player);
     }
 
-    // ставим afk через шедулер — если не уверены в контексте
+    // ставим afk через шедулер если не в регионе игрока
     public void setAfkScheduled(UUID uuid, boolean afk) {
         Player player = Bukkit.getPlayer(uuid);
         if (player == null) {
@@ -156,7 +156,7 @@ public class AfkManager implements Listener {
         }, 1L);
     }
 
-    // переключение из /afk — мы в контексте игрока, проверка мобов ок
+    // из /afk — мы в регионе игрока, мобов проверить можно
     public void toggleAfk(Player player) {
         UUID uuid = player.getUniqueId();
         boolean isCurrentlyAfk = afkStatus.getOrDefault(uuid, false);
@@ -186,7 +186,7 @@ public class AfkManager implements Listener {
                 // движение снимает любой афк даже ручной
                 setAfkScheduled(uuid, false);
             } else {
-                // остальная активность снимает только авто-афк
+                // остальное тока авто-афк снимает
                 boolean isManual = manualAfk.getOrDefault(uuid, false);
                 if (!isManual) {
                     setAfkScheduled(uuid, false);

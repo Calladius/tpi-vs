@@ -67,8 +67,8 @@ jar будет в target/TPI_VS.jar
 впиши в `server.properties`:
 ```properties
 require-resource-pack=true
-resource-pack=https://github.com/Calladius/vnlla-resourcepack/releases/download/v1.0/vnlla-resourcepack.zip
-resource-pack-sha1=3d08d1e1bcf4ad8a2a9da1250c4fd7bcf3caa6c4
+resource-pack=https://github.com/Calladius/vnlla-resourcepack/releases/download/v1.1/vnlla-resourcepack.zip
+resource-pack-sha1=5a6e723e2fbac1c8c49e4b340088cf63257b00e7
 resource-pack-prompt={"text":"Для таба нужен ресурспак","color":"gold"}
 ```
 
