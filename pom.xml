@@ -6,7 +6,7 @@
 
     <groupId>me.calladius</groupId>
     <artifactId>tpi-vs</artifactId>
-    <version>1.0.1</version>
+    <version>1.0.2</version>
     <packaging>jar</packaging>
 
     <name>TPI_VS</name>
