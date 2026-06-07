@@ -96,10 +96,16 @@ public class TabManager {
         CHAR_WIDTHS['я'] = 7;
     }
 
-    // ширина дефолтного префикса — по нему выравниваем все ники
+    // ширина префиксной зоны — максимум из дефолтного и всех текущих префиксов
     private int getMaxPixelWidth() {
-        String def = plugin.getPluginConfig().getDefaultPrefix();
-        return getPixelWidth(def);
+        int max = getPixelWidth(plugin.getPluginConfig().getDefaultPrefix());
+        for (Player p : Bukkit.getOnlinePlayers()) {
+            String prefix = plugin.getPrefixManager().getPrefix(p.getUniqueId());
+            if (prefix == null || prefix.isEmpty()) continue;
+            int w = getPixelWidth(prefix);
+            if (w > max) max = w;
+        }
+        return max;
     }
 
     public TabManager(TpiVsPlugin plugin) {
