@@ -744,10 +744,12 @@ public class AdminGui implements Listener {
 
     private void dropForTarget(Player target, ItemStack item) {
         target.getScheduler().execute(plugin, () -> {
-            // дропаем вперёд по взгляду, не под ноги
-            org.bukkit.Location dropLoc = target.getEyeLocation().add(target.getLocation().getDirection().multiply(0.8));
-            org.bukkit.entity.Item dropped = target.getWorld().dropItem(dropLoc, item);
-            // задержка подбора — 40 тиков (~2 сек), чтоб таргет не подобрал мгновенно
+            // спавним на уровне глаз, даём скорость вперёд как при обычном Q
+            org.bukkit.Location eye = target.getEyeLocation();
+            org.bukkit.entity.Item dropped = target.getWorld().dropItem(eye, item);
+            org.bukkit.util.Vector vel = target.getLocation().getDirection().multiply(0.3F);
+            vel.setY(vel.getY() + 0.15F); // чуть вверх
+            dropped.setVelocity(vel);
             dropped.setPickupDelay(40);
         }, () -> {}, 1L);
     }
