@@ -27,18 +27,10 @@ import java.util.*;
 
 // админская гуи для просмотра инвентаря и эндер-сундука
 //
-// эндер-сундук: открываем напрямую target.getEnderChest()
-//   - мс сам обрабатывает все клики/драги/дабл-клики
-//   - ноль хендлеров, ноль синхронизаций
-//   - подход из EnderChestViewer
-//
-// инвентарь: гибридный подход
-//   - обычные слоты (9-44): мс сам обрабатывает, мы синхроним bulk-снимком на след тике
-//   - спец слоты (0-8): отменяем, обрабатываем вручную (броня/инфо/паддинг)
-//   - дроп: отменяем, дропаем у таргета
-//   - мидл-клик: отменяем (дюп в креативе)
-//   - шифт снизу: отменяем (мс может положить в спец слот)
-//   - драг через спец слоты: отменяем
+// оба режима: кастомный инвентарь с русским названием
+//   - обычные слоты: мс сам обрабатывает клики/драги/дабл-клики
+//   - мы только синхроним bulk-снимком на след тике
+//   - спец слоты (только инвентарь): отменяем, обрабатываем вручную
 public class AdminGui implements Listener {
 
     private final TpiVsPlugin plugin;
@@ -51,6 +43,7 @@ public class AdminGui implements Listener {
     private final Set<UUID> pendingSync;
 
     private static final String INV_PREFIX = "\u0418\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c: ";
+    private static final String ENDER_PREFIX = "\u042d\u043d\u0434\u0435\u0440-\u0441\u0443\u043d\u0434\u0443\u043a: ";
 
     private static final int INFO_SLOT = 0;
     private static final int HELMET_SLOT = 2;
@@ -80,7 +73,6 @@ public class AdminGui implements Listener {
     // ==================== открытие гуи ====================
 
     public void openInventoryGui(Player admin, Player target) {
-        // чистим другие просмотры
         viewingEnder.remove(admin.getUniqueId());
         viewingInventory.put(admin.getUniqueId(), target.getUniqueId());
         enterInteractMode(admin);
@@ -116,12 +108,23 @@ public class AdminGui implements Listener {
         admin.openInventory(inv);
     }
 
-    // эндер-сундук — открываем напрямую, мс сам всё обработает
+    // эндер-сундук — кастомный инвентарь с русским названием
+    // мс сам обрабатывает все клики/драги, мы синхроним в таргет
     public void openEnderChestGui(Player admin, Player target) {
         viewingInventory.remove(admin.getUniqueId());
         viewingEnder.put(admin.getUniqueId(), target.getUniqueId());
         enterInteractMode(admin);
-        admin.openInventory(target.getEnderChest());
+
+        Inventory inv = Bukkit.createInventory(null, 27, ENDER_PREFIX + target.getName());
+
+        ItemStack[] contents = target.getEnderChest().getContents();
+        for (int i = 0; i < contents.length && i < 27; i++) {
+            if (contents[i] != null) {
+                inv.setItem(i, contents[i].clone());
+            }
+        }
+
+        admin.openInventory(inv);
     }
 
     // ==================== геймод ====================
@@ -145,6 +148,24 @@ public class AdminGui implements Listener {
         }
     }
 
+    // ==================== определение режима просмотра ====================
+
+    // возвращает режим: "inv", "ender" или null
+    private String getViewMode(Player admin) {
+        UUID uuid = admin.getUniqueId();
+        String title = admin.getOpenInventory().getTitle();
+        if (title.startsWith(INV_PREFIX) && viewingInventory.containsKey(uuid)) return "inv";
+        if (title.startsWith(ENDER_PREFIX) && viewingEnder.containsKey(uuid)) return "ender";
+        return null;
+    }
+
+    private UUID getTargetUuid(Player admin) {
+        UUID uuid = admin.getUniqueId();
+        UUID invTarget = viewingInventory.get(uuid);
+        if (invTarget != null) return invTarget;
+        return viewingEnder.get(uuid);
+    }
+
     // ==================== эвенты ====================
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -152,12 +173,12 @@ public class AdminGui implements Listener {
         if (!(event.getWhoClicked() instanceof Player admin)) return;
         UUID adminUuid = admin.getUniqueId();
 
-        // эндер-сундук — мс сам всё делает, не вмешиваемся
-        if (viewingEnder.containsKey(adminUuid) && !viewingInventory.containsKey(adminUuid)) return;
+        String title = event.getView().getTitle();
+        boolean isInv = title.startsWith(INV_PREFIX) && viewingInventory.containsKey(adminUuid);
+        boolean isEnder = title.startsWith(ENDER_PREFIX) && viewingEnder.containsKey(adminUuid);
+        if (!isInv && !isEnder) return;
 
-        UUID targetUuid = viewingInventory.get(adminUuid);
-        if (targetUuid == null) return;
-
+        UUID targetUuid = isInv ? viewingInventory.get(adminUuid) : viewingEnder.get(adminUuid);
         Player target = Bukkit.getPlayer(targetUuid);
         if (target == null || !target.isOnline()) {
             admin.sendMessage(Component.text("\u0418\u0433\u0440\u043e\u043a \u043f\u043e\u043a\u0438\u043d\u0443\u043b \u0441\u0435\u0440\u0432\u0435\u0440!").color(NamedTextColor.RED));
@@ -176,6 +197,23 @@ public class AdminGui implements Listener {
             return;
         }
 
+        // ===== эндер-сундук =====
+        if (isEnder) {
+            // все слоты обычные, мс сам обработает
+            // только шифт снизу — мс может не найти куда положить, но это ок
+            // дроп — дропаем у таргета
+            if (clickedTop && (click == ClickType.DROP || click == ClickType.CONTROL_DROP)) {
+                event.setCancelled(true);
+                handleEnderDrop(admin, target, rawSlot, event);
+                return;
+            }
+            // всё остальное — мс сам, синхроним
+            scheduleSync(admin, target, false);
+            return;
+        }
+
+        // ===== инвентарь =====
+
         // клик по своему инвентарю (нижнему)
         if (!clickedTop) {
             if (event.isShiftClick()) {
@@ -183,7 +221,6 @@ public class AdminGui implements Listener {
                 event.setCancelled(true);
                 shiftFromBottom(admin, target, event);
             }
-            // обычный клик по своему инвентарю — мс сам разберётся
             return;
         }
 
@@ -197,7 +234,7 @@ public class AdminGui implements Listener {
             return;
         }
 
-        // дроп из обычного слота — отменяем, дропаем у таргета а не у админа
+        // дроп из обычного слота — отменяем, дропаем у таргета
         if (click == ClickType.DROP || click == ClickType.CONTROL_DROP) {
             event.setCancelled(true);
             handleDrop(admin, target, rawSlot, event);
@@ -205,8 +242,7 @@ public class AdminGui implements Listener {
         }
 
         // обычный слот, обычный клик — мс сам обработает!
-        // синхроним на следующем тике
-        scheduleSync(admin, target);
+        scheduleSync(admin, target, true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
@@ -214,19 +250,25 @@ public class AdminGui implements Listener {
         if (!(event.getWhoClicked() instanceof Player admin)) return;
         UUID adminUuid = admin.getUniqueId();
 
-        // эндер-сундук — не вмешиваемся
-        if (viewingEnder.containsKey(adminUuid) && !viewingInventory.containsKey(adminUuid)) return;
+        String title = event.getView().getTitle();
+        boolean isInv = title.startsWith(INV_PREFIX) && viewingInventory.containsKey(adminUuid);
+        boolean isEnder = title.startsWith(ENDER_PREFIX) && viewingEnder.containsKey(adminUuid);
+        if (!isInv && !isEnder) return;
 
-        UUID targetUuid = viewingInventory.get(adminUuid);
-        if (targetUuid == null) return;
-
+        UUID targetUuid = isInv ? viewingInventory.get(adminUuid) : viewingEnder.get(adminUuid);
         Player target = Bukkit.getPlayer(targetUuid);
         if (target == null) return;
 
+        // эндер-сундук — все слоты обычные, мс сам разложит
+        if (isEnder) {
+            scheduleSync(admin, target, false);
+            return;
+        }
+
+        // инвентарь — проверяем спец слоты
         Inventory topInv = event.getView().getTopInventory();
         int topSize = topInv.getSize();
 
-        // проверяем задевает ли драг спец слоты
         boolean hasTopSlots = false;
         boolean hasSpecialSlots = false;
         for (int slot : event.getRawSlots()) {
@@ -249,7 +291,7 @@ public class AdminGui implements Listener {
         }
 
         // все слоты обычные — мс сам разложит, синхроним
-        scheduleSync(admin, target);
+        scheduleSync(admin, target, true);
     }
 
     @EventHandler
@@ -258,18 +300,24 @@ public class AdminGui implements Listener {
         UUID uuid = admin.getUniqueId();
 
         UUID invTarget = viewingInventory.remove(uuid);
-        viewingEnder.remove(uuid);
+        UUID enderTarget = viewingEnder.remove(uuid);
         pendingSync.remove(uuid);
 
         // финальная синхронизация инвентаря
         if (invTarget != null) {
             Player target = Bukkit.getPlayer(invTarget);
             if (target != null && target.isOnline()) {
-                syncNow(target, event.getView().getTopInventory());
+                syncNowInventory(target, event.getView().getTopInventory());
             }
         }
 
-        // эндер-сундук не синхроним — он сам сохраняется
+        // финальная синхронизация эндер-сундука
+        if (enderTarget != null) {
+            Player target = Bukkit.getPlayer(enderTarget);
+            if (target != null && target.isOnline()) {
+                syncNowEnder(target, event.getView().getTopInventory());
+            }
+        }
 
         restoreGameMode(admin);
     }
@@ -305,10 +353,9 @@ public class AdminGui implements Listener {
         }
 
         // админ вышел — чистим
-        UUID adminUuid = quitterUuid;
-        viewingInventory.remove(adminUuid);
-        viewingEnder.remove(adminUuid);
-        pendingSync.remove(adminUuid);
+        viewingInventory.remove(quitterUuid);
+        viewingEnder.remove(quitterUuid);
+        pendingSync.remove(quitterUuid);
         restoreGameMode(quitter);
     }
 
@@ -323,40 +370,35 @@ public class AdminGui implements Listener {
         switch (event.getClick()) {
             case LEFT:
                 if (isEmpty(cursor) && !isMarker && !isEmpty(current)) {
-                    // забираем броню
                     topInv.setItem(guiSlot, createArmorMarker(guiSlot));
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     setCursorLater(admin, current.clone());
                 } else if (!isEmpty(cursor) && (isMarker || isEmpty(current))) {
-                    // кладём броню
                     topInv.setItem(guiSlot, cursor.clone());
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     setCursorLater(admin, null);
                 } else if (!isEmpty(cursor) && !isEmpty(current) && !isMarker) {
-                    // меняем местами
                     topInv.setItem(guiSlot, cursor.clone());
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     setCursorLater(admin, current.clone());
                 }
                 break;
 
             case RIGHT:
                 if (isEmpty(cursor) && !isMarker && !isEmpty(current)) {
-                    // забираем половину
                     int half = (current.getAmount() + 1) / 2;
                     ItemStack taken = current.clone();
                     taken.setAmount(half);
                     ItemStack left = current.clone();
                     left.setAmount(current.getAmount() - half);
                     topInv.setItem(guiSlot, left.getAmount() > 0 ? left : createArmorMarker(guiSlot));
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     setCursorLater(admin, taken);
                 } else if (!isEmpty(cursor) && (isMarker || isEmpty(current))) {
-                    // кладём один
                     ItemStack placed = cursor.clone();
                     placed.setAmount(1);
                     topInv.setItem(guiSlot, placed);
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     ItemStack newCur = cursor.clone();
                     newCur.setAmount(cursor.getAmount() - 1);
                     setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
@@ -365,13 +407,13 @@ public class AdminGui implements Listener {
                         ItemStack merged = current.clone();
                         merged.setAmount(current.getAmount() + 1);
                         topInv.setItem(guiSlot, merged);
-                        scheduleSync(admin, target);
+                        scheduleSync(admin, target, true);
                         ItemStack newCur = cursor.clone();
                         newCur.setAmount(cursor.getAmount() - 1);
                         setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
                     } else {
                         topInv.setItem(guiSlot, cursor.clone());
-                        scheduleSync(admin, target);
+                        scheduleSync(admin, target, true);
                         setCursorLater(admin, current.clone());
                     }
                 }
@@ -381,7 +423,7 @@ public class AdminGui implements Listener {
             case SHIFT_RIGHT:
                 if (!isMarker && !isEmpty(current)) {
                     topInv.setItem(guiSlot, createArmorMarker(guiSlot));
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     admin.getInventory().addItem(current.clone());
                 }
                 break;
@@ -393,7 +435,7 @@ public class AdminGui implements Listener {
                     ItemStack left = current.clone();
                     left.setAmount(current.getAmount() - 1);
                     topInv.setItem(guiSlot, left.getAmount() > 0 ? left : createArmorMarker(guiSlot));
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     dropForTarget(target, dropped);
                 }
                 break;
@@ -401,7 +443,7 @@ public class AdminGui implements Listener {
             case CONTROL_DROP:
                 if (!isMarker && !isEmpty(current)) {
                     topInv.setItem(guiSlot, createArmorMarker(guiSlot));
-                    scheduleSync(admin, target);
+                    scheduleSync(admin, target, true);
                     dropForTarget(target, current.clone());
                 }
                 break;
@@ -411,7 +453,7 @@ public class AdminGui implements Listener {
         }
     }
 
-    // ==================== дроп из обычного слота ====================
+    // ==================== дроп из обычного слота инвентаря ====================
 
     private void handleDrop(Player admin, Player target, int guiSlot, InventoryClickEvent event) {
         Inventory topInv = event.getView().getTopInventory();
@@ -419,7 +461,6 @@ public class AdminGui implements Listener {
         if (isEmpty(current)) return;
 
         if (event.getClick() == ClickType.DROP) {
-            // дроп одного
             ItemStack dropped = current.clone();
             dropped.setAmount(1);
             ItemStack left = current.clone();
@@ -427,11 +468,31 @@ public class AdminGui implements Listener {
             topInv.setItem(guiSlot, left.getAmount() > 0 ? left : null);
             dropForTarget(target, dropped);
         } else {
-            // дроп стака (ctrl+q)
             topInv.setItem(guiSlot, null);
             dropForTarget(target, current.clone());
         }
-        scheduleSync(admin, target);
+        scheduleSync(admin, target, true);
+    }
+
+    // ==================== дроп из слота эндер-сундука ====================
+
+    private void handleEnderDrop(Player admin, Player target, int slot, InventoryClickEvent event) {
+        Inventory topInv = event.getView().getTopInventory();
+        ItemStack current = topInv.getItem(slot);
+        if (isEmpty(current)) return;
+
+        if (event.getClick() == ClickType.DROP) {
+            ItemStack dropped = current.clone();
+            dropped.setAmount(1);
+            ItemStack left = current.clone();
+            left.setAmount(current.getAmount() - 1);
+            topInv.setItem(slot, left.getAmount() > 0 ? left : null);
+            dropForTarget(target, dropped);
+        } else {
+            topInv.setItem(slot, null);
+            dropForTarget(target, current.clone());
+        }
+        scheduleSync(admin, target, false);
     }
 
     // ==================== шифт клик из инвентаря админа ====================
@@ -465,7 +526,6 @@ public class AdminGui implements Listener {
         if (guiSlot >= 0) {
             ItemStack existing = topInv.getItem(guiSlot);
             if (!isEmpty(existing) && existing.isSimilar(item)) {
-                // добавляем в существующий стак
                 int total = existing.getAmount() + item.getAmount();
                 int max = existing.getMaxStackSize();
                 if (total <= max) {
@@ -478,13 +538,12 @@ public class AdminGui implements Listener {
                     merged.setAmount(max);
                     topInv.setItem(guiSlot, merged);
                     item.setAmount(total - max);
-                    // item остаётся в руке админа с остатком
                 }
             } else {
                 topInv.setItem(guiSlot, item.clone());
                 event.setCurrentItem(new ItemStack(Material.AIR));
             }
-            scheduleSync(admin, target);
+            scheduleSync(admin, target, true);
         } else {
             admin.sendMessage(Component.text("\u0418\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c \u0438\u0433\u0440\u043e\u043a\u0430 \u043f\u043e\u043b\u043e\u043d!").color(NamedTextColor.RED));
         }
@@ -493,20 +552,23 @@ public class AdminGui implements Listener {
     // ==================== синхронизация ====================
 
     // отложенная — на следующем тике, с дедупликацией
-    private void scheduleSync(Player admin, Player target) {
+    private void scheduleSync(Player admin, Player target, boolean isInventory) {
         if (pendingSync.add(admin.getUniqueId())) {
             admin.getScheduler().execute(plugin, () -> {
                 pendingSync.remove(admin.getUniqueId());
                 if (!admin.isOnline()) return;
                 String title = admin.getOpenInventory().getTitle();
-                if (!title.startsWith(INV_PREFIX)) return;
-                syncNow(target, admin.getOpenInventory().getTopInventory());
+                if (isInventory && title.startsWith(INV_PREFIX)) {
+                    syncNowInventory(target, admin.getOpenInventory().getTopInventory());
+                } else if (!isInventory && title.startsWith(ENDER_PREFIX)) {
+                    syncNowEnder(target, admin.getOpenInventory().getTopInventory());
+                }
             }, () -> {}, 1L);
         }
     }
 
-    // bulk синхронизация — читаем весь топ инвентарь, пишем в таргет
-    private void syncNow(Player target, Inventory topInv) {
+    // bulk синхронизация инвентаря
+    private void syncNowInventory(Player target, Inventory topInv) {
         // снимок обычных слотов (9-35 -> 9-35, 36-44 -> 0-8)
         ItemStack[] normalItems = new ItemStack[36];
         for (int guiSlot = 9; guiSlot <= 35; guiSlot++) {
@@ -531,13 +593,11 @@ public class AdminGui implements Listener {
                     case OFFHAND_SLOT -> offhand = item.clone();
                 }
             }
-            // если слот пуст (например дабл-клик забрал) — возвращаем маркер
             if (isEmpty(item)) {
                 topInv.setItem(slot, createArmorMarker(slot));
             }
         }
 
-        // пишем в таргет через его шедулер (folia)
         final ItemStack fH = helmet, fC = chestplate, fL = leggings, fB = boots, fO = offhand;
         target.getScheduler().execute(plugin, () -> {
             if (!target.isOnline()) return;
@@ -552,6 +612,22 @@ public class AdminGui implements Listener {
                 target.getInventory().setItemInOffHand(fO);
             } else {
                 target.getInventory().setItemInOffHand(new ItemStack(Material.AIR));
+            }
+        }, () -> {}, 1L);
+    }
+
+    // bulk синхронизация эндер-сундука
+    private void syncNowEnder(Player target, Inventory topInv) {
+        ItemStack[] snapshot = new ItemStack[27];
+        for (int i = 0; i < 27; i++) {
+            ItemStack item = topInv.getItem(i);
+            snapshot[i] = isEmpty(item) ? null : item.clone();
+        }
+
+        target.getScheduler().execute(plugin, () -> {
+            if (!target.isOnline()) return;
+            for (int i = 0; i < 27; i++) {
+                target.getEnderChest().setItem(i, snapshot[i]);
             }
         }, () -> {}, 1L);
     }
