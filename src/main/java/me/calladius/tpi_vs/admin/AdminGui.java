@@ -8,6 +8,7 @@ import net.kyori.adventure.text.format.TextDecoration;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 
 import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -31,8 +32,8 @@ public class AdminGui implements Listener {
 
     private final Map<UUID, UUID> viewingInventory;
     private final Map<UUID, UUID> viewingEnder;
-    // виртуальный курсор — предмет "в руке" админа, работает в спектаторе
-    private final Map<UUID, ItemStack> virtualCursor;
+    // геймод до открытия гуи, вернём при закрытии
+    private final Map<UUID, GameMode> savedGameMode;
 
     private static final String INV_PREFIX = "\u0418\u043d\u0432\u0435\u043d\u0442\u0430\u0440\u044c: ";
     private static final String ENDER_PREFIX = "\u042d\u043d\u0434\u0435\u0440-\u0441\u0443\u043d\u0434\u0443\u043a: ";
@@ -59,39 +60,12 @@ public class AdminGui implements Listener {
         this.miniMessage = MiniMessage.miniMessage();
         this.viewingInventory = new HashMap<>();
         this.viewingEnder = new HashMap<>();
-        this.virtualCursor = new HashMap<>();
-    }
-
-    // получить виртуальный курсор
-    private ItemStack getVirtualCursor(Player admin) {
-        return virtualCursor.get(admin.getUniqueId());
-    }
-
-    // установить виртуальный курсор и показать в action bar
-    private void setVirtualCursor(Player admin, ItemStack item) {
-        if (item == null || item.getType() == Material.AIR) {
-            virtualCursor.remove(admin.getUniqueId());
-        } else {
-            virtualCursor.put(admin.getUniqueId(), item.clone());
-        }
-        showCursorInfo(admin);
-    }
-
-    // показать что админ держит в action bar
-    private void showCursorInfo(Player admin) {
-        ItemStack cursor = getVirtualCursor(admin);
-        if (cursor != null) {
-            String name = cursor.hasItemMeta() && cursor.getItemMeta().hasDisplayName()
-                ? cursor.getItemMeta().getDisplayName() : cursor.getType().name();
-            admin.sendActionBar(Component.text("\u270b " + cursor.getAmount() + "x " + name).color(NamedTextColor.YELLOW));
-        } else {
-            admin.sendActionBar(Component.text("\u270b \u0440\u0443\u043a\u0430 \u043f\u0443\u0441\u0442\u0430").color(NamedTextColor.GRAY));
-        }
+        this.savedGameMode = new HashMap<>();
     }
 
     public void openInventoryGui(Player admin, Player target) {
         viewingInventory.put(admin.getUniqueId(), target.getUniqueId());
-        virtualCursor.remove(admin.getUniqueId());
+        enterInteractMode(admin);
 
         Inventory inv = Bukkit.createInventory(null, 45, INV_PREFIX + target.getName());
 
@@ -121,12 +95,11 @@ public class AdminGui implements Listener {
         }
 
         admin.openInventory(inv);
-        showCursorInfo(admin);
     }
 
     public void openEnderChestGui(Player admin, Player target) {
         viewingEnder.put(admin.getUniqueId(), target.getUniqueId());
-        virtualCursor.remove(admin.getUniqueId());
+        enterInteractMode(admin);
 
         Inventory inv = Bukkit.createInventory(null, 27, ENDER_PREFIX + target.getName());
 
@@ -138,7 +111,27 @@ public class AdminGui implements Listener {
         }
 
         admin.openInventory(inv);
-        showCursorInfo(admin);
+    }
+
+    // переключаем в креатив если спектатор — чтоб мог работать с инвентарём
+    // креатив может летать и бессмертный, почти как спектатор
+    private void enterInteractMode(Player admin) {
+        if (admin.getGameMode() == GameMode.SPECTATOR) {
+            savedGameMode.put(admin.getUniqueId(), GameMode.SPECTATOR);
+            admin.setGameMode(GameMode.CREATIVE);
+            admin.setAllowFlight(true);
+            admin.setFlying(true);
+        }
+    }
+
+    // вернуть прежний геймод
+    private void restoreGameMode(Player admin) {
+        GameMode saved = savedGameMode.remove(admin.getUniqueId());
+        if (saved != null) {
+            admin.getScheduler().execute(plugin, () -> {
+                admin.setGameMode(saved);
+            }, () -> {}, 1L);
+        }
     }
 
     // ==================== эвенты ====================
@@ -171,22 +164,20 @@ public class AdminGui implements Listener {
             return;
         }
 
-        // отменяем всё — рулим сами через виртуальный курсор
-        event.setCancelled(true);
-
         int rawSlot = event.getRawSlot();
         int topSize = event.getView().getTopInventory().getSize();
         boolean clickedTop = rawSlot >= 0 && rawSlot < topSize;
 
         if (!clickedTop) {
-            // клик по своему инвентарю
-            if (event.isShiftClick()) {
+            if (event.isShiftClick() && !isEmpty(event.getCurrentItem())) {
+                event.setCancelled(true);
                 shiftFromBottom(admin, target, event, isInventory, isEnder);
             }
             return;
         }
 
-        // клик по верхнему инвентарю
+        event.setCancelled(true);
+
         if (isInventory) {
             if (rawSlot == INFO_SLOT || PADDING_SLOTS.contains(rawSlot)) return;
             if (ARMOR_SLOTS.contains(rawSlot)) {
@@ -224,7 +215,7 @@ public class AdminGui implements Listener {
 
         event.setCancelled(true);
 
-        ItemStack cursor = getVirtualCursor(admin);
+        ItemStack cursor = event.getCursor();
         if (isEmpty(cursor)) return;
 
         if (isInventory) {
@@ -268,13 +259,9 @@ public class AdminGui implements Listener {
         }
 
         int newAmt = cursorAmt - totalPlaced;
-        if (newAmt > 0) {
-            ItemStack newCursor = cursor.clone();
-            newCursor.setAmount(newAmt);
-            setVirtualCursor(admin, newCursor);
-        } else {
-            setVirtualCursor(admin, null);
-        }
+        ItemStack newCursor = newAmt > 0 ? cursor.clone() : new ItemStack(Material.AIR);
+        if (newAmt > 0) newCursor.setAmount(newAmt);
+        setCursorLater(admin, newCursor);
     }
 
     @EventHandler
@@ -283,11 +270,7 @@ public class AdminGui implements Listener {
         UUID uuid = admin.getUniqueId();
         viewingInventory.remove(uuid);
         viewingEnder.remove(uuid);
-        // если админ что-то держал в виртуальном курсоре — дропаем ему
-        ItemStack cursor = virtualCursor.remove(uuid);
-        if (cursor != null) {
-            admin.getInventory().addItem(cursor);
-        }
+        restoreGameMode(admin);
     }
 
     @EventHandler
@@ -295,14 +278,14 @@ public class AdminGui implements Listener {
         UUID uuid = event.getPlayer().getUniqueId();
         viewingInventory.remove(uuid);
         viewingEnder.remove(uuid);
-        virtualCursor.remove(uuid);
+        restoreGameMode(event.getPlayer());
     }
 
     // ==================== клик по слоту ====================
 
     private void slotClick(Player admin, Player target, int guiSlot, InventoryClickEvent event, boolean isInventory, boolean isEnder) {
         ItemStack current = event.getCurrentItem();
-        ItemStack cursor = getVirtualCursor(admin);
+        ItemStack cursor = event.getCursor();
         int targetSlot = isInventory ? mapGuiSlotToTargetSlot(guiSlot) : guiSlot;
         if (isInventory && targetSlot < 0) return;
 
@@ -311,15 +294,13 @@ public class AdminGui implements Listener {
         switch (event.getClick()) {
             case LEFT:
                 if (isEmpty(cursor) && !isEmpty(current)) {
-                    // берём весь стак в виртуальный курсор
                     topInv.setItem(guiSlot, null);
                     syncSlot(target, targetSlot, null, isEnder);
-                    setVirtualCursor(admin, current.clone());
+                    setCursorLater(admin, current.clone());
                 } else if (!isEmpty(cursor) && isEmpty(current)) {
-                    // кладём весь стак из виртуального курсора
                     topInv.setItem(guiSlot, cursor.clone());
                     syncSlot(target, targetSlot, cursor.clone(), isEnder);
-                    setVirtualCursor(admin, null);
+                    setCursorLater(admin, null);
                 } else if (!isEmpty(cursor) && !isEmpty(current)) {
                     if (cursor.isSimilar(current)) {
                         int total = current.getAmount() + cursor.getAmount();
@@ -329,7 +310,7 @@ public class AdminGui implements Listener {
                             merged.setAmount(total);
                             topInv.setItem(guiSlot, merged);
                             syncSlot(target, targetSlot, merged, isEnder);
-                            setVirtualCursor(admin, null);
+                            setCursorLater(admin, null);
                         } else {
                             ItemStack merged = current.clone();
                             merged.setAmount(max);
@@ -337,20 +318,18 @@ public class AdminGui implements Listener {
                             syncSlot(target, targetSlot, merged, isEnder);
                             ItemStack rem = cursor.clone();
                             rem.setAmount(total - max);
-                            setVirtualCursor(admin, rem);
+                            setCursorLater(admin, rem);
                         }
                     } else {
-                        // свап
                         topInv.setItem(guiSlot, cursor.clone());
                         syncSlot(target, targetSlot, cursor.clone(), isEnder);
-                        setVirtualCursor(admin, current.clone());
+                        setCursorLater(admin, current.clone());
                     }
                 }
                 break;
 
             case RIGHT:
                 if (isEmpty(cursor) && !isEmpty(current)) {
-                    // берём половину
                     int half = (current.getAmount() + 1) / 2;
                     ItemStack taken = current.clone();
                     taken.setAmount(half);
@@ -358,16 +337,15 @@ public class AdminGui implements Listener {
                     left.setAmount(current.getAmount() - half);
                     topInv.setItem(guiSlot, left.getAmount() > 0 ? left : null);
                     syncSlot(target, targetSlot, left.getAmount() > 0 ? left : null, isEnder);
-                    setVirtualCursor(admin, taken);
+                    setCursorLater(admin, taken);
                 } else if (!isEmpty(cursor) && isEmpty(current)) {
-                    // кладём 1 штуку
                     ItemStack placed = cursor.clone();
                     placed.setAmount(1);
                     topInv.setItem(guiSlot, placed);
                     syncSlot(target, targetSlot, placed, isEnder);
                     ItemStack newCur = cursor.clone();
                     newCur.setAmount(cursor.getAmount() - 1);
-                    setVirtualCursor(admin, newCur.getAmount() > 0 ? newCur : null);
+                    setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
                 } else if (!isEmpty(cursor) && !isEmpty(current)) {
                     if (cursor.isSimilar(current) && current.getAmount() < current.getMaxStackSize()) {
                         ItemStack merged = current.clone();
@@ -376,18 +354,17 @@ public class AdminGui implements Listener {
                         syncSlot(target, targetSlot, merged, isEnder);
                         ItemStack newCur = cursor.clone();
                         newCur.setAmount(cursor.getAmount() - 1);
-                        setVirtualCursor(admin, newCur.getAmount() > 0 ? newCur : null);
+                        setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
                     } else {
                         topInv.setItem(guiSlot, cursor.clone());
                         syncSlot(target, targetSlot, cursor.clone(), isEnder);
-                        setVirtualCursor(admin, current.clone());
+                        setCursorLater(admin, current.clone());
                     }
                 }
                 break;
 
             case SHIFT_LEFT:
             case SHIFT_RIGHT:
-                // шифт из верхнего — в инвентарь админа
                 if (!isEmpty(current)) {
                     topInv.setItem(guiSlot, null);
                     syncSlot(target, targetSlot, null, isEnder);
@@ -440,7 +417,7 @@ public class AdminGui implements Listener {
 
     private void armorClick(Player admin, Player target, int guiSlot, InventoryClickEvent event) {
         ItemStack current = event.getCurrentItem();
-        ItemStack cursor = getVirtualCursor(admin);
+        ItemStack cursor = event.getCursor();
         boolean isMarker = isMarkerItem(current);
         Inventory topInv = event.getView().getTopInventory();
 
@@ -449,15 +426,15 @@ public class AdminGui implements Listener {
                 if (isEmpty(cursor) && !isMarker && !isEmpty(current)) {
                     topInv.setItem(guiSlot, createArmorMarker(guiSlot));
                     syncArmorSlot(target, guiSlot, null);
-                    setVirtualCursor(admin, current.clone());
+                    setCursorLater(admin, current.clone());
                 } else if (!isEmpty(cursor) && (isMarker || isEmpty(current))) {
                     topInv.setItem(guiSlot, cursor.clone());
                     syncArmorSlot(target, guiSlot, cursor.clone());
-                    setVirtualCursor(admin, null);
+                    setCursorLater(admin, null);
                 } else if (!isEmpty(cursor) && !isEmpty(current) && !isMarker) {
                     topInv.setItem(guiSlot, cursor.clone());
                     syncArmorSlot(target, guiSlot, cursor.clone());
-                    setVirtualCursor(admin, current.clone());
+                    setCursorLater(admin, current.clone());
                 }
                 break;
 
@@ -470,7 +447,7 @@ public class AdminGui implements Listener {
                     left.setAmount(current.getAmount() - half);
                     topInv.setItem(guiSlot, left.getAmount() > 0 ? left : createArmorMarker(guiSlot));
                     syncArmorSlot(target, guiSlot, left.getAmount() > 0 ? left : null);
-                    setVirtualCursor(admin, taken);
+                    setCursorLater(admin, taken);
                 } else if (!isEmpty(cursor) && (isMarker || isEmpty(current))) {
                     ItemStack placed = cursor.clone();
                     placed.setAmount(1);
@@ -478,7 +455,7 @@ public class AdminGui implements Listener {
                     syncArmorSlot(target, guiSlot, placed);
                     ItemStack newCur = cursor.clone();
                     newCur.setAmount(cursor.getAmount() - 1);
-                    setVirtualCursor(admin, newCur.getAmount() > 0 ? newCur : null);
+                    setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
                 } else if (!isEmpty(cursor) && !isMarker && !isEmpty(current)) {
                     if (cursor.isSimilar(current) && current.getAmount() < current.getMaxStackSize()) {
                         ItemStack merged = current.clone();
@@ -487,11 +464,11 @@ public class AdminGui implements Listener {
                         syncArmorSlot(target, guiSlot, merged);
                         ItemStack newCur = cursor.clone();
                         newCur.setAmount(cursor.getAmount() - 1);
-                        setVirtualCursor(admin, newCur.getAmount() > 0 ? newCur : null);
+                        setCursorLater(admin, newCur.getAmount() > 0 ? newCur : null);
                     } else {
                         topInv.setItem(guiSlot, cursor.clone());
                         syncArmorSlot(target, guiSlot, cursor.clone());
-                        setVirtualCursor(admin, current.clone());
+                        setCursorLater(admin, current.clone());
                     }
                 }
                 break;
@@ -561,6 +538,14 @@ public class AdminGui implements Listener {
     }
 
     // ==================== хелперы ====================
+
+    // установить курсор через тик — при отмене ивента setCursor не работает
+    private void setCursorLater(Player admin, ItemStack item) {
+        ItemStack cursor = item != null && item.getType() != Material.AIR ? item.clone() : new ItemStack(Material.AIR);
+        admin.getScheduler().execute(plugin, () -> {
+            admin.setItemOnCursor(cursor);
+        }, () -> {}, 1L);
+    }
 
     private void syncSlot(Player target, int targetSlot, ItemStack item, boolean isEnder) {
         if (isEnder) {
