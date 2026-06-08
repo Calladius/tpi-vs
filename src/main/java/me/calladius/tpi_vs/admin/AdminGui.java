@@ -106,6 +106,7 @@ public class AdminGui implements Listener {
         }
 
         admin.openInventory(inv);
+        scheduleRefresh(admin);
     }
 
     // эндер-сундук — кастомный инвентарь с русским названием
@@ -125,6 +126,7 @@ public class AdminGui implements Listener {
         }
 
         admin.openInventory(inv);
+        scheduleRefresh(admin);
     }
 
     // ==================== геймод ====================
@@ -630,6 +632,104 @@ public class AdminGui implements Listener {
                 target.getEnderChest().setItem(i, snapshot[i]);
             }
         }, () -> {}, 1L);
+    }
+
+    // ==================== обновление гуи из таргета ====================
+
+    // периодическое обновление — каждые 20 тиков (~1 сек) читаем инвентарь таргета
+    // и обновляем гуи админа, чтоб видеть изменения таргета в реальном времени
+    // самоостанавливается когда админ закрывает гуи
+    private void scheduleRefresh(Player admin) {
+        UUID adminUuid = admin.getUniqueId();
+
+        admin.getScheduler().execute(plugin, () -> {
+            if (!admin.isOnline()) return;
+
+            String title = admin.getOpenInventory().getTitle();
+            boolean isInv = title.startsWith(INV_PREFIX) && viewingInventory.containsKey(adminUuid);
+            boolean isEnder = title.startsWith(ENDER_PREFIX) && viewingEnder.containsKey(adminUuid);
+
+            // больше не смотрим — останов
+            if (!isInv && !isEnder) return;
+
+            // админ только что сделал действие, синк ещё pending — пропустим
+            if (pendingSync.contains(adminUuid)) {
+                scheduleRefresh(admin);
+                return;
+            }
+
+            UUID targetUuid = isInv ? viewingInventory.get(adminUuid) : viewingEnder.get(adminUuid);
+            Player target = Bukkit.getPlayer(targetUuid);
+            if (target == null || !target.isOnline()) {
+                scheduleRefresh(admin);
+                return;
+            }
+
+            // читаем инвентарь таргета на его потоке, потом обновляем гуи на потоке админа
+            if (isInv) {
+                target.getScheduler().execute(plugin, () -> {
+                    if (!target.isOnline()) { scheduleRefresh(admin); return; }
+
+                    // снимок инвентаря таргета
+                    final ItemStack[] snapshot = new ItemStack[41];
+                    ItemStack[] contents = target.getInventory().getContents();
+                    for (int i = 0; i < 36 && i < contents.length; i++) {
+                        snapshot[i] = contents[i] != null ? contents[i].clone() : null;
+                    }
+                    snapshot[36] = !isEmpty(target.getInventory().getHelmet()) ? target.getInventory().getHelmet().clone() : null;
+                    snapshot[37] = !isEmpty(target.getInventory().getChestplate()) ? target.getInventory().getChestplate().clone() : null;
+                    snapshot[38] = !isEmpty(target.getInventory().getLeggings()) ? target.getInventory().getLeggings().clone() : null;
+                    snapshot[39] = !isEmpty(target.getInventory().getBoots()) ? target.getInventory().getBoots().clone() : null;
+                    snapshot[40] = !isEmpty(target.getInventory().getItemInOffHand()) ? target.getInventory().getItemInOffHand().clone() : null;
+
+                    // обновляем гуи админа
+                    admin.getScheduler().execute(plugin, () -> {
+                        if (!admin.isOnline()) return;
+                        if (pendingSync.contains(adminUuid)) { scheduleRefresh(admin); return; }
+
+                        Inventory topInv = admin.getOpenInventory().getTopInventory();
+                        // обычные слоты
+                        for (int i = 9; i <= 35; i++) {
+                            topInv.setItem(i, snapshot[i] != null ? snapshot[i].clone() : null);
+                        }
+                        for (int i = 0; i <= 8; i++) {
+                            topInv.setItem(36 + i, snapshot[i] != null ? snapshot[i].clone() : null);
+                        }
+                        // броня
+                        topInv.setItem(HELMET_SLOT, snapshot[36] != null ? snapshot[36].clone() : createArmorMarker(HELMET_SLOT));
+                        topInv.setItem(CHESTPLATE_SLOT, snapshot[37] != null ? snapshot[37].clone() : createArmorMarker(CHESTPLATE_SLOT));
+                        topInv.setItem(LEGGINGS_SLOT, snapshot[38] != null ? snapshot[38].clone() : createArmorMarker(LEGGINGS_SLOT));
+                        topInv.setItem(BOOTS_SLOT, snapshot[39] != null ? snapshot[39].clone() : createArmorMarker(BOOTS_SLOT));
+                        topInv.setItem(OFFHAND_SLOT, snapshot[40] != null ? snapshot[40].clone() : createArmorMarker(OFFHAND_SLOT));
+
+                        scheduleRefresh(admin);
+                    }, () -> scheduleRefresh(admin), 1L);
+                }, () -> scheduleRefresh(admin), 1L);
+            } else {
+                // эндер-сундук
+                target.getScheduler().execute(plugin, () -> {
+                    if (!target.isOnline()) { scheduleRefresh(admin); return; }
+
+                    final ItemStack[] snapshot = new ItemStack[27];
+                    ItemStack[] contents = target.getEnderChest().getContents();
+                    for (int i = 0; i < 27 && i < contents.length; i++) {
+                        snapshot[i] = contents[i] != null ? contents[i].clone() : null;
+                    }
+
+                    admin.getScheduler().execute(plugin, () -> {
+                        if (!admin.isOnline()) return;
+                        if (pendingSync.contains(adminUuid)) { scheduleRefresh(admin); return; }
+
+                        Inventory topInv = admin.getOpenInventory().getTopInventory();
+                        for (int i = 0; i < 27; i++) {
+                            topInv.setItem(i, snapshot[i] != null ? snapshot[i].clone() : null);
+                        }
+
+                        scheduleRefresh(admin);
+                    }, () -> scheduleRefresh(admin), 1L);
+                }, () -> scheduleRefresh(admin), 1L);
+            }
+        }, () -> {}, 20L);
     }
 
     // ==================== хелперы ====================
